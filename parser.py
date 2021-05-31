@@ -1,5 +1,5 @@
 import os
-from datetime import datetime, timedelta
+from datetime import datetime
 import matplotlib.dates as mdates
 
 import numpy as np
@@ -83,23 +83,24 @@ def extract_body_fat(session):
     return session.body_fat
 
 
-def plot_weight_history(date_series, weight_series):
+def plot(date_series, data_series, title, unit):
     sns.set()
     date_series = pd.Series(date_series[3:])
-    weight_series = pd.Series(weight_series[3:])
-    series_mask = np.isfinite(weight_series)
-    assert len(date_series) == len(weight_series)
+    data_series = pd.Series(data_series[3:])
+    series_mask = np.isfinite(data_series)
+    assert len(date_series) == len(data_series)
     pyplot.figure(figsize=(8, 6))
     ax = pyplot.gca()
     pyplot.xticks(rotation=45)
     ax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%y'))
     ax.xaxis.set_major_locator(mdates.MonthLocator())
     pyplot.xlabel("Date")
-    pyplot.yticks(np.arange(round(min(weight_series)), max(weight_series) + 1, 1))
-    pyplot.ylabel("Weight (kg)")
-    pyplot.title("Weight History")
+    if len(data_series.dropna()) > 2:
+        pyplot.yticks(np.arange(round(min(data_series)), max(data_series) + 1, 1))
+    pyplot.ylabel("{} ({})".format(title, unit))
+    pyplot.title("{} History".format(title))
     pyplot.tight_layout()
-    pyplot.plot(date_series[series_mask], weight_series[series_mask], color='navy', linestyle='-', marker='o',
+    pyplot.plot(date_series[series_mask], data_series[series_mask], color='navy', linestyle='-', marker='o',
                 markersize=4)
     pyplot.show()
 
@@ -109,9 +110,9 @@ if __name__ == "__main__":
     session_text_list = extract_sessions(file_data, 3)
     dates, sessions = extract_dates(session_text_list, file_data)
     weights = []
-    body_fat_list = []
+    body_fats = []
     for s in sessions:
         weights.append(extract_weight(s))
-        body_fat_list.append(extract_body_fat(s))
-        # print(s.date, s.weight)
-    plot_weight_history(dates, weights)
+        body_fats.append(extract_body_fat(s))
+    plot(dates, weights, "Weight", "kg")
+    plot(dates, body_fats, "Body Fat", "%")
