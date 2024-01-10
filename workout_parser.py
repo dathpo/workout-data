@@ -1,37 +1,45 @@
 import os
+import sys
 import re
 from datetime import datetime
 from pathlib import Path
-import matplotlib.dates as mdates
+from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 import seaborn as sns
 from matplotlib import pyplot
+import matplotlib.dates as mdates
 
 
+@dataclass
 class Session:
-    def __init__(
-        self, date, unprocessed_lines, weight=np.nan, body_fat=np.nan, exercises=np.nan
-    ):
-        self.date = date
-        self.unprocessed_lines = unprocessed_lines
-        self.body_fat = body_fat
-        self.weight = weight
-        self.exercises = exercises
+    date: str
+    unprocessed_lines: list
+    weight: float = np.nan
+    body_fat: float = np.nan
+    exercises: list = field(default_factory=list)
 
 
+@dataclass
+class ExerciseVariation:
+    grip_type: str  # e.g., 'ring', 'bar', 'parallettes'
+    position_type: str  # e.g., 'knee', 'incline', 'decline'
+    movement_type: str  # e.g., 'eccentric', 'isometric'
+
+
+@dataclass
 class Set:
-    def __init__(self, reps, form, rest_time):
-        self.reps = reps
-        self.form = form
-        self.rest_time = rest_time
+    variation: ExerciseVariation
+    reps: int
+    alt_reps: int
+    form: str
+    rest_time: int
 
 
+@dataclass
 class Exercise:
-    def __init__(self, exercise_type, variant, sets):
-        self.type = exercise_type
-        self.variant = variant
-        self.sets = sets
+    exercise_type: str
+    sets: list[Set]
 
 
 def parse():
@@ -65,7 +73,7 @@ def list_session_dates(file_bytes):
 
 def extract_weight(session):
     split_unprocessed_lines = session.unprocessed_lines.split("\n")
-    for i, line in enumerate(split_unprocessed_lines):
+    for _, line in enumerate(split_unprocessed_lines):
         if line.find("weight") != -1:
             session.weight = float(line.split()[1])
             remainder_lines = session.unprocessed_lines.split("\n", 2)
@@ -78,41 +86,96 @@ def extract_weight(session):
     return session.weight
 
 
+def extract_variation(text):
+    variation_regex = r"\(([^,]*),([^,]*),([^)]*)\)"
+    variation = None
+    try:
+        # Check for a parenthesis before the colon
+        if "(" in text and ")" in text:
+            variation_match = re.search(variation_regex, text)
+            # Assert that there are exactly two commas within the parenthesis
+            assert (
+                variation_match
+            ), "Variation format error: expected two commas within parenthesis."
+
+            # Extract the variation details within parentheses
+            if variation_match:
+                grip_type, position_type, movement_type = [
+                    item.strip() for item in variation_match.groups()
+                ]
+                # Create ExerciseVariation object, handling missing data
+                variation = ExerciseVariation(
+                    grip_type or None,
+                    position_type or None,
+                    movement_type or None,
+                )
+
+    except AssertionError as e:
+        print(f"Assertion Error on text '{text}': {e}")
+        sys.exit(1)
+
+    return variation
+
+
 def extract_exercises(session):
     if session.unprocessed_lines != "":
         exercises_text_list = split_lines(session.unprocessed_lines, 2)
-        # print("\nNEW (pre):", session.unprocessed_lines)
-        # s = '- ring row parallel legs: 10 G, :55:28\n'
-        print("exlist:", exercises_text_list)
         session_exercises = []
-        exercise = Exercise
-        session_exercises.append(exercise)
         for sets_list in exercises_text_list:
-            print("setlist (pre):", sets_list)
             sets_list = split_lines(sets_list, 1)
-            print("setlist (post):", sets_list)
             exercise_types = []
+            sets = []
             for set_text in sets_list:
-                exercise_type = re.search(r"(?<=- )(.*?)(?=[:,\n])", set_text)
-                if exercise_type is not None:
-                    exercise_types.append(exercise_type.group(0))
-                    print("exercise type found: ", exercise_type.group(0))
-                else:
-                    print("exercise type not found: ", set_text)
+                # Find the position of the colon
+                colon_position = set_text.find(":")
+
+                # Extract the part of the string before the colon
+                pre_colon_text = (
+                    set_text[:colon_position] if colon_position != -1 else set_text
+                )
+
+                variation = extract_variation(pre_colon_text)
+
+                # Extract the exercise type
+                exercise_type_match = re.search(
+                    r"(?<=- )(.*?)(?=\s*\(|[:,\n])", set_text
+                )
+                if exercise_type_match:
+                    exercise_type = exercise_type_match.group(0).strip()
+
+                    # Process the rest of the line
+                    line = set_text[len(exercise_type) + 2 :]
+
+                    pattern = r"(\d+)\s*([\w\s]+?)(?:\s*\(?(?:\s*(\d+)\s*OB)?\)?,)?\s*(?:(\d+)\s*min)?"
+                    details_match = re.search(pattern, line)
+                    if details_match:
+                        reps, form, alt_reps, rest_time = details_match.groups()
+                        reps = int(reps)
+                        form = form.strip() if form else ""
+                        alt_reps = int(alt_reps) if alt_reps else 0
+                        rest_time = int(rest_time) if rest_time else 0
+
+                        sets.append(Set(variation, reps, alt_reps, form, rest_time))
+
+                    exercise_types.append(exercise_type)
+
             if len(exercise_types) > 0:
-                assert len(set(exercise_types)) == 1
-                print(f"exercise type: {exercise_type}")
-                exercise.type = exercise_type.group(0)
-        # print(result.group(1))
-        # result = re.search(r"(?<=- )(.*?)(?=[:,\n])", s)
-        # print("find: ", result.group(1))
-        # print("\nNEW (post):", split_data)
+                exercise_types_set = set(exercise_types)
+                if len(exercise_types_set) > 1:
+                    print(exercise_types_set)
+                assert (
+                    len(exercise_types_set) == 1
+                ), "Multiple exercise types found in a single set list"
+                exercise_type = next(iter(exercise_types_set))
+
+                session_exercises.append(Exercise(exercise_type, sets))
+        session.exercises = session_exercises
         return session_exercises
 
 
 def extract_body_fat(session):
     split_unprocessed_lines = session.unprocessed_lines.split("\n\n", 1)
-    for i, line in enumerate(split_unprocessed_lines):
+    for _, line in enumerate(split_unprocessed_lines):
         if line.find("body fat") != -1:
             session.body_fat = float(line.split("\n")[-1].split()[-1][:-1])
             del split_unprocessed_lines[0]
@@ -147,21 +210,48 @@ def plot(date_series, data_series, title, unit):
     pyplot.show()
 
 
+def print_session(session):
+    print(
+        f"\nSession date: {session.date}, weight: {session.weight}, body fat: {session.body_fat}"
+    )
+    if session.exercises:
+        for e in session.exercises:
+            print(f"  exercise: {e.exercise_type}, sets: {len(e.sets)}")
+            for s in e.sets:
+                variation_attributes = []
+                if s.variation:
+                    if s.variation.grip_type:
+                        variation_attributes.append(
+                            f"grip type: {s.variation.grip_type}"
+                        )
+                    if s.variation.position_type:
+                        variation_attributes.append(
+                            f"position type: {s.variation.position_type}"
+                        )
+                    if s.variation.movement_type:
+                        variation_attributes.append(
+                            f"movement type: {s.variation.movement_type}"
+                        )
+                var_str = ""
+                if len(variation_attributes) > 0:
+                    var_str = ", ".join(variation_attributes) + ", "
+                print(
+                    f"    {var_str}reps: {s.reps}, alt. reps: {s.alt_reps}, form: {s.form}, rest time: {s.rest_time}"
+                )
+
+
 def main():
     file_data = parse()
-    session_text_list = split_lines(
-        file_data, 3
-    )  # Three newline separators to separate sessions
+    # Three newline separators to separate sessions
+    session_text_list = split_lines(file_data, 3)
     dates, sessions = extract_session_dates(session_text_list, file_data)
     weights = []
-    body_fats = []
-    exercises = []
     for s in sessions:
         weights.append(extract_weight(s))
-        body_fats.append(extract_body_fat(s))
-        exercises.append(extract_exercises(s))
-        # print(s.date, s.weight)
-    # plot(dates, weights, "Weight", "kg")
+        extract_body_fat(s)
+        extract_exercises(s)
+        print_session(s)
+    plot(dates, weights, "Weight", "kg")
     # plot(dates, body_fats, "Body Fat", "%")
 
 
