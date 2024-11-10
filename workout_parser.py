@@ -54,9 +54,15 @@ def split_lines(data, multiplier):
 
 def extract_session_dates(sessions_text, file_bytes):
     session_dates = [i[:8] for i in sessions_text]
+
     assert set(session_dates) == set(list_session_dates(file_bytes))
+
+    diff = [item for item in session_dates if session_dates.count(item) > 1]
+    assert len(diff) == 0, f"Duplicate session dates found: {set(diff)}"
+
     for i, date in enumerate(session_dates):
         session_dates[i] = datetime.strptime(date, "%d/%m/%y").date()
+
     return session_dates, [
         Session(session_dates[i], sesh.split("\n", 1)[1:][0])
         for i, sesh in enumerate(sessions_text)
