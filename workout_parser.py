@@ -252,6 +252,7 @@ def main():
     session_text_list = split_lines(file_data, 3)
     dates, sessions = extract_session_dates(session_text_list, file_data)
     weights = []
+    # TODO: if rest time on last exercise of session, delete it
     for s in sessions:
         weights.append(extract_weight(s))
         extract_body_fat(s)
